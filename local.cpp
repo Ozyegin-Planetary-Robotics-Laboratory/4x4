@@ -1,14 +1,17 @@
 #include <iostream>
 #include <SDL2/SDL.h>
-#include <string>
-#include <sstream>
-#include <unistd.h>
-#include <arpa/inet.h>
+#include <sys/types.h>
 #include <sys/socket.h>
-#include <csignal>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <csignal>  // For signal handling
+#include <cstring>
+#include <sstream>  // For std::ostringstream
 
-// Constants for the deadzone threshold
-const float DEADZONE_THRESHOLD = 0.2f;
+// Constants for buffer sizes and joystick deadzone
+const int BUFFER_SIZE = 65536; // 64 KB buffer size
+const float DEADZONE_THRESHOLD = 0.1f;
 
 // Function to map joystick values to a specified range
 float mapValue(int value, int min_in, int max_in, float min_out, float max_out) {
@@ -34,7 +37,7 @@ void handleSigint(int sig) {
 
 int main() {
     // Register signal handler
-    signal(SIGINT, handleSigint);
+    std::signal(SIGINT, handleSigint);
 
     // Initialize SDL for joystick
     if (SDL_Init(SDL_INIT_JOYSTICK) < 0) {
@@ -55,7 +58,7 @@ int main() {
 
     // Set up socket for communication with the rover
     std::string rover_ip = "192.168.1.3"; // Replace with your rover's IP address
-    int rover_port = 12345; // Choose a port to communicate with the rover
+    int rover_port = 12344; // Choose a port to communicate with the rover
 
     int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sockfd < 0) {
@@ -64,22 +67,28 @@ int main() {
     }
     std::cout << "Socket created successfully.\n";
 
+    // Set socket send buffer size
+    if (setsockopt(sockfd, SOL_SOCKET, SO_SNDBUF, &BUFFER_SIZE, sizeof(BUFFER_SIZE)) < 0) {
+        std::cerr << "Failed to set send buffer size" << std::endl;
+    } else {
+        std::cout << "Send buffer size set to " << BUFFER_SIZE << " bytes" << std::endl;
+    }
+
     sockaddr_in rover_addr;
     rover_addr.sin_family = AF_INET;
     rover_addr.sin_port = htons(rover_port);
     inet_pton(AF_INET, rover_ip.c_str(), &rover_addr.sin_addr);
-    std::cout << "Socket address set up for rover at " << rover_ip << ":" << rover_port << std::endl;
 
     // Main loop for joystick handling
     while (running) {
         SDL_JoystickUpdate();
 
-        int x_axis = SDL_JoystickGetAxis(joystick, 1);
+        int x_axis =-1* SDL_JoystickGetAxis(joystick, 1);
         int y_axis = SDL_JoystickGetAxis(joystick, 0);
 
         // Map joystick input to -1.0 to 1.0 range
         float linear_velocity = mapValue(y_axis, -32768, 32767, -1.0, 1.0);
-        float angular_velocity = mapValue(x_axis, -32768, 32767, -1.0, 1.0);
+        float angular_velocity = mapValue(x_axis, -32767, 32768, -1.0, 1.0);
 
         // Apply deadzone
         linear_velocity = applyDeadzone(linear_velocity, DEADZONE_THRESHOLD);
@@ -103,7 +112,7 @@ int main() {
         }
 
         // Adjust delay as needed
-        SDL_Delay(50);
+        SDL_Delay(10);
     }
 
     // Clean up
